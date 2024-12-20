@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components/native";
-import { db } from "../firebase"; // Asegúrate de usar la ruta correcta
-import { collection, onSnapshot } from "firebase/firestore";
-import { useNavigation } from "@react-navigation/native";
+import { db } from "../firebase";
+import { collection, onSnapshot, deleteDoc, doc } from "firebase/firestore";
+import { Alert } from "react-native";
+import { Audio } from "expo-av";
 
 export default function ListadoActividades() {
   const [actividades, setActividades] = useState([]);
-  const navigation = useNavigation();
+  const [tiempoRestante, setTiempoRestante] = useState(null); // Para manejar el tiempo restante
+  const [actividadActual, setActividadActual] = useState(null); // Para manejar la actividad en curso
+  const [intervalo, setIntervalo] = useState(null); // Para manejar el intervalo
+
+  const [inicioSonido, setInicioSonido] = useState(null); // Sonido al inicio
+  const [finalSonido, setFinalSonido] = useState(null); // Sonido al final
 
   useEffect(() => {
-    const obtenerActividades = async () => {
+    const obtenerActividades = () => {
       const unsubscribe = onSnapshot(collection(db, "actividades"), (snapshot) => {
         const actividadesObtenidas = snapshot.docs.map((doc) => ({
           id: doc.id,
@@ -22,13 +28,97 @@ export default function ListadoActividades() {
     };
 
     obtenerActividades();
+
+    // Cargar sonidos al montar el componente
+    cargarSonidos();
+
+    return () => {
+      // Liberar recursos al desmontar el componente
+      if (inicioSonido) inicioSonido.unloadAsync();
+      if (finalSonido) finalSonido.unloadAsync();
+    };
   }, []);
 
+  const cargarSonidos = async () => {
+    try {
+      const [inicio, final] = await Promise.all([
+        Audio.Sound.createAsync(require("../../assets/audio/luna-rise-part-one.mp3")),
+        Audio.Sound.createAsync(require("../../assets/audio/beep.mp3")),
+      ]);
+      setInicioSonido(inicio.sound);
+      setFinalSonido(final.sound);
+    } catch (error) {
+      console.error("Error al cargar los sonidos:", error);
+    }
+  };
+
+  const reproducirSonido = async (sonido) => {
+    try {
+      await sonido.replayAsync();
+    } catch (error) {
+      console.error("Error al reproducir el sonido:", error);
+    }
+  };
+
+  const iniciarCuentaRegresiva = (actividad) => {
+    // Limpia cualquier intervalo previo
+    if (intervalo) clearInterval(intervalo);
+
+    let tiempoEnSegundos = actividad.tiempo * 60; // Convierte minutos a segundos
+    setTiempoRestante(tiempoEnSegundos);
+    setActividadActual(actividad); // Guarda la actividad actual
+
+    // Reproducir sonido al inicio
+    if (inicioSonido) reproducirSonido(inicioSonido);
+
+    const nuevoIntervalo = setInterval(() => {
+      setTiempoRestante((prevTiempo) => {
+        if (prevTiempo <= 1) {
+          clearInterval(nuevoIntervalo); // Detiene el intervalo cuando llega a 0
+          finalizarActividad(actividad); // Llama a la función para finalizar la actividad
+          return 0;
+        }
+        return prevTiempo - 1;
+      });
+    }, 1000);
+
+    setIntervalo(nuevoIntervalo); // Guarda el intervalo
+  };
+
+  const finalizarActividad = async (actividad) => {
+    // Reproducir sonido al finalizar
+    if (finalSonido) reproducirSonido(finalSonido);
+
+    // Muestra la alerta
+    Alert.alert(
+      "Tiempo finalizado",
+      `El tiempo para la actividad "${actividad.actividad}" ha finalizado.`,
+      [{ text: "OK" }]
+    );
+
+    // Elimina la actividad de Firestore
+    try {
+      await deleteDoc(doc(db, "actividades", actividad.id));
+      setActividades((prevActividades) =>
+        prevActividades.filter((item) => item.id !== actividad.id)
+      );
+    } catch (error) {
+      console.error("Error al eliminar la actividad:", error);
+    }
+
+    // Reinicia el estado del tiempo y actividad actual
+    setTiempoRestante(null);
+    setActividadActual(null);
+  };
+
   const manejarClickActividad = (actividad) => {
-    navigation.navigate("CuentaRegresiva", {
-      actividad: actividad.actividad,
-      tiempo: actividad.tiempo,
-    });
+    iniciarCuentaRegresiva(actividad);
+  };
+
+  const formatearTiempo = (segundos) => {
+    const minutos = Math.floor(segundos / 60);
+    const segundosRestantes = segundos % 60;
+    return `${minutos}:${segundosRestantes < 10 ? "0" : ""}${segundosRestantes}`;
   };
 
   return (
@@ -37,14 +127,21 @@ export default function ListadoActividades() {
       {actividades.length > 0 ? (
         actividades.map((actividad) => (
           <Card key={actividad.id} onPress={() => manejarClickActividad(actividad)}>
-            <TextoActividad>{actividad.actividad}</TextoActividad>
-            <TextoDescripcion>{actividad.descripcion}</TextoDescripcion>
-            <TextoTiempo>{`Tiempo: ${actividad.tiempo} mins`}</TextoTiempo>
+            <TextoActividad>{actividad.actividad || "Sin nombre"}</TextoActividad>
+            <TextoDescripcion>{actividad.descripcion || "Sin descripción"}</TextoDescripcion>
+            <TextoTiempo>{`Tiempo: ${actividad.tiempo || 0} mins`}</TextoTiempo>
           </Card>
         ))
       ) : (
         <TextoSinActividades>No hay actividades registradas.</TextoSinActividades>
       )}
+      <Tiempo>
+        {tiempoRestante !== null ? (
+          <TextoTiempo>{`Tiempo restante: ${formatearTiempo(tiempoRestante)}`}</TextoTiempo>
+        ) : (
+          <TextoTiempo>Selecciona una actividad para iniciar la cuenta regresiva.</TextoTiempo>
+        )}
+      </Tiempo>
     </Container>
   );
 }
@@ -69,6 +166,10 @@ const Card = styled.TouchableOpacity`
   padding: 15px;
   margin-bottom: 15px;
   border-radius: 10px;
+  shadow-color: #000;
+  shadow-offset: 0px 2px;
+  shadow-opacity: 0.1;
+  shadow-radius: 2px;
   elevation: 3;
 `;
 
@@ -86,7 +187,7 @@ const TextoDescripcion = styled.Text`
 
 const TextoTiempo = styled.Text`
   font-size: 14px;
-  color: #777;
+  color: #000000;
   margin-top: 5px;
 `;
 
@@ -95,4 +196,12 @@ const TextoSinActividades = styled.Text`
   color: #999;
   text-align: center;
   margin-top: 20px;
+`;
+
+const Tiempo = styled.View`
+  background-color: #268537;
+  padding: 10px;
+  border-radius: 10px;
+  margin-top: 20px;
+  color: black;
 `;

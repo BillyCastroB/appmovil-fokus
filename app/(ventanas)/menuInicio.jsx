@@ -43,8 +43,8 @@ export default function MenuInicio() {
     <Container>
       <Cabecera>
         <FondoImgCabecera source={require("../../assets/images/fondo-negro.jpg")} resizeMode="cover">
-          <Nombre>Ing. BILLY CASTRO BULLON</Nombre>
-          <Condicion>Su Condición: ORDINARIO</Condicion>
+          <Nombre>BILLY CASTRO BULLON</Nombre>
+          <Condicion>Administre su tiempo</Condicion>
         </FondoImgCabecera>
         <Formulario>
           <TituloDiv>Ingrese los datos de su actividad</TituloDiv>
@@ -57,7 +57,7 @@ export default function MenuInicio() {
               onChangeText={setActividad}
             />
           </Div1>
-          <LineaNegra />
+          <LineaNegra/>
           <Div2>
             <IconoUser source={require("../../assets/images/icono-descripcion.png")} />
             <UsuarioTextInput
